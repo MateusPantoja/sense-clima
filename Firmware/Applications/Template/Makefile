@@ -1,7 +1,7 @@
 AVAILABLE_TARGETS = qcx212_0h00
 TOOLCHAIN         = GCC
 PROJECT_NAME      = Template
-BINNAME           = Template
+BINNAME           = HTNB32L-XXX-Template
 
 TOP := ../..
 

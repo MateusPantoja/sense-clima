@@ -50,3 +50,7 @@
 #include <stdio.h>
 #include "cmsis_os2.h"
 
+
+#define INIT_TASK_STACK_SIZE    (1024*6)
+
+

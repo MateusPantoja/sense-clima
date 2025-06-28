@@ -11,3 +11,4 @@ Firmware/Debug/logging_output.log
 Firmware/Debug/htnb32l.ini
 Firmware/Debug/cfg.digest
 Firmware/.vscode/configurationCache.log
+Firmware/Debug/Scripts/__pycache__/COM_GUI.cpython-39.pyc
