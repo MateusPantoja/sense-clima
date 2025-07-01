@@ -42,7 +42,7 @@
 #include "MQTTClient.h"
 #include "uart_qcx212.h"
 
-#define MQTT_TLS_ENABLE 1
+#define MQTT_TLS_ENABLE 0
 
 #define MQTT_GENERAL_TIMEOUT 60000
 
@@ -92,7 +92,7 @@ uint8_t HT_MQTT_Connect(MQTTClient *mqtt_client, Network *mqtt_network, char *ad
  * 
  * \retval none
  *******************************************************************/
-void HT_MQTT_Publish(MQTTClient *mqtt_client, char *topic, uint8_t *payload, uint32_t len, enum QoS qos, uint8_t retained, uint16_t id, uint8_t dup);
+int HT_MQTT_Publish(MQTTClient *mqtt_client, char *topic, uint8_t *payload, uint32_t len, enum QoS qos, uint8_t retained, uint16_t id, uint8_t dup);
 
 /*!******************************************************************
  * \fn void HT_MQTT_SubscribeCallback(MessageData *msg)

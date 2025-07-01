@@ -26,7 +26,10 @@ AZURE_IOT_ENABLE = y
 CFLAGS_INC        +=  -I Inc
 
 obj-y             += Src/main.o \
-                     Src/HT_BSP_Custom.o
+                     Src/HT_BSP_Custom.o \
+                     Src/HT_GPIO_Api.o \
+                     Src/HT_MQTT_Api.o \
+                     Src/HT_SenseClima.o
 
 include $(TOP)/SDK/PLAT/tools/scripts/Makefile.rules
 
