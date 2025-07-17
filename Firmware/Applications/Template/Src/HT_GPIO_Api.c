@@ -64,6 +64,18 @@ void HT_GPIO_WritePin(uint16_t pin, uint32_t instance, uint16_t value) {
     GPIO_PinWrite(instance, 1 << pin, (value ? 1 << pin : 0)); 
 }
 
+uint32_t HT_GPIO_ReadPin(uint16_t pin, uint32_t instance) {
+    return GPIO_PinRead(instance, pin);
+}
+
+void gpio_set_direction(gpio_pin_direction_t direction) {
+    
+    gpio_pin_config_t config;
+    config.pinDirection = direction;
+    GPIO_PinConfig(BLUE_BUTTON_INSTANCE, BLUE_BUTTON_PIN, &config);
+
+}
+
 void HT_GPIO_ButtonInit(void) {
 
     pad_config_t padConfig;
@@ -83,14 +95,12 @@ void HT_GPIO_ButtonInit(void) {
 
     config.pinDirection = GPIO_DirectionInput;
     config.misc.interruptConfig = GPIO_InterruptDisabled; 
-;
+
 
     GPIO_PinConfig(BLUE_BUTTON_INSTANCE, BLUE_BUTTON_PIN, &config);
     GPIO_PinConfig(WHITE_BUTTON_INSTANCE, WHITE_BUTTON_PIN, &config);
 
-    // Set IQR vector and enable IRQ
-    //XIC_SetVector(PXIC_Gpio_IRQn, HT_GPIO_IRQnCallback);
-    //XIC_EnableIRQ(PXIC_Gpio_IRQn);
+
 }
 
 void HT_GPIO_LedInit(void) {

@@ -157,6 +157,10 @@ void HT_GPIO_LedInit(void);
  *******************************************************************/
 void HT_GPIO_WritePin(uint16_t pin, uint32_t instance, uint16_t value);
 
+uint32_t HT_GPIO_ReadPin(uint16_t pin, uint32_t instance);
+
+void gpio_set_direction(gpio_pin_direction_t direction);
+
 #endif /* __HT_GPIO_API_H__ */
 
 /************************ HT Micron Semicondutores S.A *****END OF FILE****/

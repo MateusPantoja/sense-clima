@@ -14,7 +14,8 @@ static QueueHandle_t psEventQueueHandle;
 static uint8_t gImsi[16] = {0};
 static uint32_t gCellID = 0;
 static NmAtiSyncRet gNetworkInfo;
-static uint8_t mqttEpSlpHandler = 0xff;
+
+uint8_t mqttEpSlpHandler = 0xff;
 
 static volatile uint8_t simReady = 0;
 

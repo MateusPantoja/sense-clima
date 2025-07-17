@@ -15,6 +15,7 @@
 
 #include "HT_SenseClima.h"
 
+
 /* Function prototypes  ------------------------------------------------------------------*/
 
 /*!******************************************************************
@@ -51,7 +52,6 @@ static void HT_Yield_Thread(void *arg);
  *******************************************************************/
 static void HT_FSM_MQTTWritePayload(uint8_t *ptr, uint8_t size);
 
-
 /*!******************************************************************
  * \fn static void HT_FSM_LedStatus(HT_Led_Type led, uint16_t state)
  * \brief Change a specific led status to ON/OFF.
@@ -77,8 +77,6 @@ static void HT_FSM_LedStatus(HT_Led_Type led, uint16_t state);
 static HT_ConnectionStatus HT_FSM_MQTTConnect(void);
 
 
-
-
 /* ---------------------------------------------------------------------------------------*/
 
 static MQTTClient mqttClient;
@@ -97,27 +95,68 @@ static const char password[] = {""};
 static const char addr[] = {"131.255.82.115"};
 static char topic[25] = {0};
 
-// Blue button topic where the digital twin will transmit its messages.
-char topic_blueled_sw[] = {"hana/pantoja/pantoja_blueled_sw"}; //pantoja_bluebutton_sw
-char topic_whiteled_sw[] = {"hana/pantoja/pantoja_whiteled_sw"}; //
 
-extern uint16_t blue_irqn_mask;
-extern uint16_t white_irqn_mask;
+static const char topic_temperature[] = {"hana/externo/senseclima/00001/temperature"};
+static const char topic_humidity[] = {"hana/externo/senseclima/00001/humidity"};
+static const char topic_interval[] = {"hana/externo/senseclima/00001/interval"};
+
+//extern uint8_t mqttEpSlpHandler;
 
 //FSM state.
 volatile HT_FSM_States state = HT_WAIT_FOR_BUTTON_STATE;
 
-//Button color definition.
-volatile HT_Button button_color = HT_UNDEFINED;
-
-//Subcribe callback flag
-volatile uint8_t subscribe_callback = 0;
-
 //Buffer where the digital twin messages will be stored.
 static uint8_t subscribe_buffer[HT_SUBSCRIBE_BUFF_SIZE] = {0};
 
-static StaticTask_t yield_thread, public_thread, btn_thread;
-static uint8_t yieldTaskStack[1024*4], publicTaskStack[1024*4], btntaskStack[1024*4];
+static StaticTask_t yield_thread, dht_thread, sleep_thread;
+static uint8_t yieldTaskStack[1024*4], dhtTaskStack[1024*4], sleepTaskStack[1024*2];
+
+#define TIMER_ID        0
+#define RTC_TIMEOUT_MS  60000  // 10 segundos
+
+uint8_t voteHandle = 0xFF;
+extern uint8_t mqttEpSlpHandler;
+
+
+void beforeHibernateCb(void *pdata, slpManLpState state) {
+    printf("[Callback] Antes de Hibernate\n");
+}
+
+void afterHibernateCb(void *pdata, slpManLpState state) {
+    printf("[Callback] Acordou de Hibernate\n");
+}
+
+void sleepWithMode(slpManSlpState_t mode) {
+
+    printf("\n=== Entrando em Modo Sono %d===\n", mode);
+
+    appSetCFUN(0);
+    appSetEcSIMSleepSync(1);
+
+    slpManSetPmuSleepMode(true, mode, false);
+
+    // 1. Setup dos modos
+    slpManApplyPlatVoteHandle("SLEEP_TEST", &voteHandle);
+
+    slpManRegisterUsrdefinedBackupCb(beforeHibernateCb, NULL, SLPMAN_HIBERNATE_STATE);
+    slpManRegisterUsrdefinedRestoreCb(afterHibernateCb, NULL, SLPMAN_HIBERNATE_STATE);
+    
+
+    // Habilita o modo de sono
+    slpManPlatVoteEnableSleep(voteHandle, mode);
+
+    //slpManPlatVoteDisableSleep(mqttEpSlpHandler, SLP_STATE_MAX);
+
+    // Ativa o temporizador RTC como wakeup
+    slpManDeepSlpTimerStart(TIMER_ID, RTC_TIMEOUT_MS);
+
+    // Espera passiva — o sistema deve entrar em sono automaticamente
+    while (1) {
+        printf("Hibernando ....");
+        osDelay(1000);  // após o tempo, sistema acorda e mensagens são exibidas
+    }
+}
+
 
 static void HT_YieldThread(void *arg) {
     while (1) {
@@ -141,29 +180,71 @@ static void HT_Yield_Thread(void *arg) {
     osThreadNew(HT_YieldThread, NULL, &task_attr);
 }
 
+
+static void HT_DhtThread(void *arg) {
+        float temp, humi;
+        char tempString[10], humString[10];
+        int count = 0;
+
+        while (1)
+        {
+           
+            int dht_status = DHT22_Read(&temp, &humi);
+            
+            printf("\nExecultando contagem %d\n", count + 1);
+            
+            if(count >= 5) {
+                printf("\nProcesso para deep sleep\n");
+                sleepWithMode(SLP_HIB_STATE);
+            }
+            
+            if(dht_status == 0){
+                int temp_int = (int) (temp * 10);
+                int hum_int = (int) (humi * 10);
+                sprintf(tempString, "%d.%d", temp_int/10, temp_int%10);
+                sprintf(humString, "%d.%d", hum_int/10, hum_int%10);
+                printf("\n\nExecultando Dht\n");
+                printf("\ntemp %s*C | hum %s %%\n", tempString, humString);
+
+                while(!mqttClient.isconnected){
+                    if(HT_FSM_MQTTConnect() == HT_NOT_CONNECTED) {
+                        printf("\n MQTT Connection Error!\n");
+                        osDelay(5000);
+                    }
+                }
+
+                HT_MQTT_Publish(&mqttClient, (char *)topic_temperature, (uint8_t *)tempString, strlen(tempString), QOS0, 0, 0, 0);
+                HT_MQTT_Publish(&mqttClient, (char *)topic_humidity, (uint8_t *)humString, strlen(humString), QOS0, 0, 0, 0);
+            }
+
+            count++;
+            osDelay(1000);
+     
+        }
+        
+}
+
+static void HT_Dht_Thread(void *arg) {
+    osThreadAttr_t task_attr;
+
+    memset(&task_attr,0,sizeof(task_attr));
+    memset(dhtTaskStack, 0xA5,LED_TASK_STACK_SIZE);
+    task_attr.name = "dht_thread";
+    task_attr.stack_mem = dhtTaskStack;
+    task_attr.stack_size = LED_TASK_STACK_SIZE;
+    task_attr.priority = osPriorityNormal;
+    task_attr.cb_mem = &dht_thread;
+    task_attr.cb_size = sizeof(StaticTask_t);
+
+    osThreadNew(HT_DhtThread, NULL, &task_attr);
+}
+
 static void HT_FSM_MQTTWritePayload(uint8_t *ptr, uint8_t size) {
     // Reset payload and writes the message
     memset(mqtt_payload, 0, sizeof(mqtt_payload));
     memcpy(mqtt_payload, ptr, size);
 }
 
-
-
-static void HT_FSM_LedStatus(HT_Led_Type led, uint16_t state) {
-
-    // Turns on/off selected led
-    switch (led) {
-    case HT_BLUE_LED:
-        HT_GPIO_WritePin(BLUE_LED_PIN, BLUE_LED_INSTANCE, state);
-        break;
-    case HT_WHITE_LED:
-        HT_GPIO_WritePin(WHITE_LED_PIN, WHITE_LED_INSTANCE, state);
-        break;
-    case HT_GREEN_LED:
-        HT_GPIO_WritePin(GREEN_LED_PIN, GREEN_LED_INSTANCE, state);
-        break;
-    }
-}
 
 static HT_ConnectionStatus HT_FSM_MQTTConnect(void) {
 
@@ -187,24 +268,26 @@ void led_state_manager(uint8_t *payload, uint8_t payload_len,
    
         uint8_t state = atoi(payload);
 
-        if(!strncmp((char *)topic, topic_blueled_sw, strlen(topic_blueled_sw))){
-            HT_FSM_LedStatus(HT_BLUE_LED, state ? LED_ON : LED_OFF);
-        } else if(!strncmp((char *)topic, topic_whiteled_sw, strlen(topic_whiteled_sw))) {
-            HT_FSM_LedStatus(HT_WHITE_LED, state ? LED_ON : LED_OFF);
-        }
 }
 
 
 void HT_Fsm(void) {
 
     // Initialize MQTT Client and Connect to MQTT Broker defined in global variables
+    printf("\nTentando Conectar ao MQTT CLient...");
     if(HT_FSM_MQTTConnect() == HT_NOT_CONNECTED) {
         printf("\n MQTT Connection Error!\n");
         while(1);
     }
 
+    
     // Init irqn after connection
-    HT_GPIO_ButtonInit();
+    //HT_GPIO_ButtonInit();
+
+    printf("\nIniciando DHT !!!\n");
+    DHT22_Init();
+
+    HT_Dht_Thread(NULL);
     
     //HT_MQTT_Subscribe(&mqttClient, topic_blueled_sw, QOS0);
     //HT_MQTT_Subscribe(&mqttClient, topic_whiteled_sw, QOS0);
@@ -220,7 +303,11 @@ void HT_Fsm(void) {
     //Btn Task()
     //HT_Btn_Thread_Start(NULL);
 
-    printf("Executing fsm...\n");
+    printf("Executing SenseClima\n");
+    while(1){
+        osDelay(100);
+    }
+
 
 }
 

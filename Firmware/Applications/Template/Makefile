@@ -29,7 +29,8 @@ obj-y             += Src/main.o \
                      Src/HT_BSP_Custom.o \
                      Src/HT_GPIO_Api.o \
                      Src/HT_MQTT_Api.o \
-                     Src/HT_SenseClima.o
+                     Src/HT_SenseClima.o \
+                     Src/HT_DHT22.o
 
 include $(TOP)/SDK/PLAT/tools/scripts/Makefile.rules
 

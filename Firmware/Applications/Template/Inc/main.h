@@ -25,6 +25,7 @@
 #include "htnb32lxxx_hal_usart.h"
 #include "HT_SenseClima.h"
 #include "HT_GPIO_Api.h"
+#include "HT_DHT22.h"
 
 #include "bsp.h"
 #include "HT_BSP_Custom.h"
@@ -40,7 +41,6 @@
 #include "ps_lib_api.h"
 #include "lwip/netdb.h"
 #include "debug_log.h"
-#include "slpman_qcx212.h"
 #include "MQTTClient.h"
 #include "plat_config.h"
 #include "debug_trace.h"
@@ -53,6 +53,11 @@
 #include "netmgr.h"
 #include <stdio.h>
 #include "cmsis_os2.h"
+#include "mw_config.h"
+#include "pmu_qcx212.h"
+
+
+
 
 
 /* Defines  ------------------------------------------------------------------*/
@@ -69,4 +74,5 @@
 #define RINGBUF_READY_FLAG      (0x06)
 #define APP_EVENT_QUEUE_SIZE    (10)
 #define MAX_PACKET_SIZE         (256)
+
 
