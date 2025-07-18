@@ -124,7 +124,7 @@ void HT_MQTT_SubscribeCallback(MessageData *msg) {
 
     //subscribe_callback = 1;
     //HT_FSM_SetSubscribeBuff((uint8_t *)msg->message->payload, (uint8_t)msg->message->payloadlen);
-    led_state_manager((uint8_t *)msg->message->payload, (uint8_t)msg->message->payloadlen, 
+    interval_manager((uint8_t *)msg->message->payload, (uint8_t)msg->message->payloadlen, 
         (uint8_t *)msg->topicName->lenstring.data, (uint8_t)msg->topicName->lenstring.len);
     
         memset(msg->message->payload, 0, msg->message->payloadlen);

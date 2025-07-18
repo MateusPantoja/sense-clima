@@ -112,11 +112,29 @@ static StaticTask_t yield_thread, dht_thread, sleep_thread;
 static uint8_t yieldTaskStack[1024*4], dhtTaskStack[1024*4], sleepTaskStack[1024*2];
 
 #define TIMER_ID        0
-#define RTC_TIMEOUT_MS  60000  // 10 segundos
+//#define RTC_TIMEOUT_MS  60000  // 10 segundos
 
 uint8_t voteHandle = 0xFF;
 extern uint8_t mqttEpSlpHandler;
 
+
+// Função para converter tempo em dias, horas, minutos e segundos para milissegundos
+uint64_t tempo_em_milisegundos(int dias, int horas, int minutos, int segundos) {
+    uint64_t total_ms = 0;
+
+    total_ms += (uint64_t)dias    * 86400000ULL;
+    total_ms += (uint64_t)horas   * 3600000ULL;
+    total_ms += (uint64_t)minutos * 60000ULL;
+    total_ms += (uint64_t)segundos* 1000ULL;
+
+    if (total_ms > 2088000000ULL  ) { // 580 horas em milissegundos
+        printf("\nTempo execede o maximo suportado pelo device!!\n");
+        printf(" Default value of 30s stup\n");
+        return 30 * 1000ULL;  // Excede o limite de 580 horas
+    }
+
+    return total_ms;
+}
 
 void beforeHibernateCb(void *pdata, slpManLpState state) {
     printf("[Callback] Antes de Hibernate\n");
@@ -148,12 +166,13 @@ void sleepWithMode(slpManSlpState_t mode) {
     //slpManPlatVoteDisableSleep(mqttEpSlpHandler, SLP_STATE_MAX);
 
     // Ativa o temporizador RTC como wakeup
-    slpManDeepSlpTimerStart(TIMER_ID, RTC_TIMEOUT_MS);
+    uint64_t interval_ms = tempo_em_milisegundos(25, 0, 0, 0);
+    slpManDeepSlpTimerStart(TIMER_ID, interval_ms);
 
     // Espera passiva — o sistema deve entrar em sono automaticamente
     while (1) {
         printf("Hibernando ....");
-        osDelay(1000);  // após o tempo, sistema acorda e mensagens são exibidas
+        osDelay(2000);  // após o tempo, sistema acorda e mensagens são exibidas
     }
 }
 
@@ -184,16 +203,76 @@ static void HT_Yield_Thread(void *arg) {
 static void HT_DhtThread(void *arg) {
         float temp, humi;
         char tempString[10], humString[10];
+        char msg_error[] = "error";
         int count = 0;
+        int attempt = 0;
 
         while (1)
         {
            
             int dht_status = DHT22_Read(&temp, &humi);
             
-            printf("\nExecultando contagem %d\n", count + 1);
+            printf("\nExecultando contagem %d\n", attempt + 1);
             
-            if(count >= 5) {
+            if(attempt > 4){
+                printf("\nDht com problemas\n");
+
+                                while(1){
+
+                    while(!mqttClient.isconnected){
+                        if(HT_FSM_MQTTConnect() == HT_NOT_CONNECTED) {
+                            printf("\n MQTT Connection Error!\n");
+                            osDelay(5000);
+                        }
+                    }
+
+                    bool ok1 = HT_MQTT_Publish(&mqttClient, (char *)topic_temperature, (uint8_t *)msg_error, strlen(msg_error), QOS0, 0, 0, 0);
+                    osDelay(2000);
+                    bool ok2 = HT_MQTT_Publish(&mqttClient, (char *)topic_humidity, (uint8_t *)msg_error, strlen(msg_error), QOS0, 0, 0, 0);
+                    osDelay(2000);
+                    if (!ok1 && !ok2) {
+                        printf("\nValores Publicados...\n");
+                        break;  // Só sai quando ambos tiverem sucesso
+                    }
+                        
+                }
+                
+                //HT_MQTT_Publish(&mqttClient, (char *)topic_temperature, (uint8_t *)msg_error, strlen(msg_error), QOS0, 0, 0, 0);
+                //HT_MQTT_Publish(&mqttClient, (char *)topic_humidity, (uint8_t *)msg_error, strlen(msg_error), QOS0, 0, 0, 0);
+                
+                printf("\nProcesso para deep sleep\n");
+                sleepWithMode(SLP_HIB_STATE);
+
+            }
+            
+            if(count >= 10) {
+                
+                printf("\ntemp %s*C | hum %s %%\n", tempString, humString);
+
+
+                while(1){
+
+                    while(!mqttClient.isconnected){
+                        if(HT_FSM_MQTTConnect() == HT_NOT_CONNECTED) {
+                            printf("\n MQTT Connection Error!\n");
+                            osDelay(5000);
+                        }
+                    }
+
+                    bool ok1 = HT_MQTT_Publish(&mqttClient, (char *)topic_temperature, (uint8_t *)tempString, strlen(tempString), QOS0, 0, 0, 0);
+                    osDelay(2000);
+                    bool ok2 = HT_MQTT_Publish(&mqttClient, (char *)topic_humidity, (uint8_t *)humString, strlen(humString), QOS0, 0, 0, 0);
+                    osDelay(2000);
+                    if (!ok1 && !ok2) {
+                        printf("\nValores Publicados...\n");
+                        break;  // Só sai quando ambos tiverem sucesso
+                    }
+                        
+                }
+                
+                //printf("ret %d", ret);
+                //osDelay(2000);
+                
                 printf("\nProcesso para deep sleep\n");
                 sleepWithMode(SLP_HIB_STATE);
             }
@@ -204,20 +283,10 @@ static void HT_DhtThread(void *arg) {
                 sprintf(tempString, "%d.%d", temp_int/10, temp_int%10);
                 sprintf(humString, "%d.%d", hum_int/10, hum_int%10);
                 printf("\n\nExecultando Dht\n");
-                printf("\ntemp %s*C | hum %s %%\n", tempString, humString);
-
-                while(!mqttClient.isconnected){
-                    if(HT_FSM_MQTTConnect() == HT_NOT_CONNECTED) {
-                        printf("\n MQTT Connection Error!\n");
-                        osDelay(5000);
-                    }
-                }
-
-                HT_MQTT_Publish(&mqttClient, (char *)topic_temperature, (uint8_t *)tempString, strlen(tempString), QOS0, 0, 0, 0);
-                HT_MQTT_Publish(&mqttClient, (char *)topic_humidity, (uint8_t *)humString, strlen(humString), QOS0, 0, 0, 0);
+                count++;
             }
 
-            count++;
+            attempt++; 
             osDelay(1000);
      
         }
@@ -263,23 +332,34 @@ void HT_FSM_SetSubscribeBuff(uint8_t *buff, uint8_t payload_len) {
     memcpy(subscribe_buffer, buff, payload_len);
 }
 
-void led_state_manager(uint8_t *payload, uint8_t payload_len, 
+void interval_manager(uint8_t *payload, uint8_t payload_len, 
     uint8_t *topic, uint8_t topic_len) {
    
-        uint8_t state = atoi(payload);
-
+        printf("\nmsg:[%s] | topico:[%s]\n", payload, topic);
+        
 }
 
 
 void HT_Fsm(void) {
 
     // Initialize MQTT Client and Connect to MQTT Broker defined in global variables
+   
     printf("\nTentando Conectar ao MQTT CLient...");
+    /*
     if(HT_FSM_MQTTConnect() == HT_NOT_CONNECTED) {
         printf("\n MQTT Connection Error!\n");
         while(1);
     }
+   */
+   
+    while(!mqttClient.isconnected){
+        if(HT_FSM_MQTTConnect() == HT_NOT_CONNECTED) {
+            printf("\n MQTT Connection Error!\n");
+            osDelay(5000);
+        }
+    }
 
+    HT_MQTT_Subscribe(&mqttClient, topic_interval, QOS0);
     
     // Init irqn after connection
     //HT_GPIO_ButtonInit();
@@ -289,20 +369,8 @@ void HT_Fsm(void) {
 
     HT_Dht_Thread(NULL);
     
-    //HT_MQTT_Subscribe(&mqttClient, topic_blueled_sw, QOS0);
     //HT_MQTT_Subscribe(&mqttClient, topic_whiteled_sw, QOS0);
     
-    //HT_Yield_Thread(NULL);
-
-    // Led to sinalize connection stablished
-    //HT_LED_GreenLedTask(NULL);
-
-    //Ldr Task
-    //HT_LDR_Task(NULL);
-
-    //Btn Task()
-    //HT_Btn_Thread_Start(NULL);
-
     printf("Executing SenseClima\n");
     while(1){
         osDelay(100);
