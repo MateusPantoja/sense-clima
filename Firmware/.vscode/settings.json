@@ -50,7 +50,8 @@
         "system_error": "c",
         "functional": "c",
         "tuple": "c",
-        "type_traits": "c"
+        "type_traits": "c",
+        "mqttclient.h": "c"
     },
     "python.autoComplete.extraPaths": [
         "${workspaceFolder}/sources/poky/bitbake/lib",

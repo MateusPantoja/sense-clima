@@ -92,7 +92,7 @@ static const char username[] = {""};
 static const char password[] = {""};
 
 //MQTT broker host address
-static const char addr[] = {"131.255.82.115"};
+static const char addr[] = {"test.mosquitto.org"}; //131.255.82.115
 static char topic[25] = {0};
 
 
@@ -111,29 +111,86 @@ static uint8_t subscribe_buffer[HT_SUBSCRIBE_BUFF_SIZE] = {0};
 static StaticTask_t yield_thread, dht_thread, sleep_thread;
 static uint8_t yieldTaskStack[1024*4], dhtTaskStack[1024*4], sleepTaskStack[1024*2];
 
+osThreadId_t yield_id = NULL;
+
 #define TIMER_ID        0
+#define MAX_TIMER_MS     2088000000UL  // 580 horas em milissegundos
+#define DEFAULT_TIMER_MS 30000UL       // 30 segundos
 //#define RTC_TIMEOUT_MS  60000  // 10 segundos
 
 uint8_t voteHandle = 0xFF;
 extern uint8_t mqttEpSlpHandler;
+//uint64_t fileContent = 0ULL;
+uint32_t interval_ms = DEFAULT_TIMER_MS;
+char interval_str[10] = {"00000000"};
 
+uint32_t tempo_em_milisegundos(const char *payload) {
+    if (!payload) return DEFAULT_TIMER_MS;
 
-// Função para converter tempo em dias, horas, minutos e segundos para milissegundos
-uint64_t tempo_em_milisegundos(int dias, int horas, int minutos, int segundos) {
-    uint64_t total_ms = 0;
+    int dias     = (payload[0] - '0') * 10 + (payload[1] - '0');
+    int horas    = (payload[2] - '0') * 10 + (payload[3] - '0');
+    int minutos  = (payload[4] - '0') * 10 + (payload[5] - '0');
+    int segundos = (payload[6] - '0') * 10 + (payload[7] - '0');
 
-    total_ms += (uint64_t)dias    * 86400000ULL;
-    total_ms += (uint64_t)horas   * 3600000ULL;
-    total_ms += (uint64_t)minutos * 60000ULL;
-    total_ms += (uint64_t)segundos* 1000ULL;
+    uint32_t total_ms = 0;
+    total_ms += (uint32_t)dias    * 86400000UL;
+    total_ms += (uint32_t)horas   * 3600000UL;
+    total_ms += (uint32_t)minutos * 60000UL;
+    total_ms += (uint32_t)segundos * 1000UL;
 
-    if (total_ms > 2088000000ULL  ) { // 580 horas em milissegundos
-        printf("\nTempo execede o maximo suportado pelo device!!\n");
-        printf(" Default value of 30s stup\n");
-        return 30 * 1000ULL;  // Excede o limite de 580 horas
+    if (total_ms > MAX_TIMER_MS) {
+        printf("\n[AVISO] Tempo excede o máximo suportado pelo dispositivo (580h).\n");
+        printf("[INFO] Valor padrão de 30 segundos será utilizado.\n");
+        return DEFAULT_TIMER_MS;
     }
 
     return total_ms;
+}
+
+
+void converter_ms_para_string(uint32_t ms, char *saida_str) {
+    uint32_t total_segundos = ms / 1000;
+
+    int dias     = total_segundos / 86400;
+    total_segundos %= 86400;
+
+    int horas    = total_segundos / 3600;
+    total_segundos %= 3600;
+
+    int minutos  = total_segundos / 60;
+    int segundos = total_segundos % 60;
+
+    // Monta a string no formato "DDhhmmss"
+    sprintf(saida_str, "%02d%02d%02d%02d", dias, horas, minutos, segundos);
+}
+
+
+static void HT_FsWrite(void) {
+	OSAFILE fp = PNULL;
+	uint32_t len;
+
+    //fileContent += 1;
+
+	fp = OsaFopen("testFile", "wb");
+	len = OsaFwrite(&interval_ms, sizeof(interval_ms), 1, fp);
+
+	if(len == 1)
+		printf("Write Success\n");
+
+	OsaFclose(fp);
+}
+
+static void HT_FsRead(void) {
+	OSAFILE fp = PNULL;
+	uint32_t len;
+	
+	fp = OsaFopen("testFile", "r");
+	len = OsaFread(&interval_ms, sizeof(interval_ms), 1, fp);
+	
+	if(len == 1)
+    	printf("Read File Success\n");
+
+	OsaFclose(fp);
 }
 
 void beforeHibernateCb(void *pdata, slpManLpState state) {
@@ -146,6 +203,15 @@ void afterHibernateCb(void *pdata, slpManLpState state) {
 
 void sleepWithMode(slpManSlpState_t mode) {
 
+    
+    osStatus_t ret = osThreadTerminate(yield_id);
+    printf("\nOs status %d\n", ret);
+
+    if(ret == osOK){
+        printf("\nTask MQTT Susbcribe foi suspensa ...\n");
+        osDelay(1000);
+    } 
+
     printf("\n=== Entrando em Modo Sono %d===\n", mode);
 
     appSetCFUN(0);
@@ -154,19 +220,21 @@ void sleepWithMode(slpManSlpState_t mode) {
     slpManSetPmuSleepMode(true, mode, false);
 
     // 1. Setup dos modos
-    slpManApplyPlatVoteHandle("SLEEP_TEST", &voteHandle);
+    //slpManApplyPlatVoteHandle("SLEEP_TEST", &voteHandle);
 
     slpManRegisterUsrdefinedBackupCb(beforeHibernateCb, NULL, SLPMAN_HIBERNATE_STATE);
     slpManRegisterUsrdefinedRestoreCb(afterHibernateCb, NULL, SLPMAN_HIBERNATE_STATE);
     
 
     // Habilita o modo de sono
-    slpManPlatVoteEnableSleep(voteHandle, mode);
+    slpManPlatVoteEnableSleep(mqttEpSlpHandler, mode);
 
     //slpManPlatVoteDisableSleep(mqttEpSlpHandler, SLP_STATE_MAX);
 
     // Ativa o temporizador RTC como wakeup
-    uint64_t interval_ms = tempo_em_milisegundos(25, 0, 0, 0);
+    //interval_ms = tempo_em_milisegundos("00000100"); //DDHHMMSS
+
+    
     slpManDeepSlpTimerStart(TIMER_ID, interval_ms);
 
     // Espera passiva — o sistema deve entrar em sono automaticamente
@@ -196,7 +264,7 @@ static void HT_Yield_Thread(void *arg) {
     task_attr.cb_mem = &yield_thread;
     task_attr.cb_size = sizeof(StaticTask_t);
 
-    osThreadNew(HT_YieldThread, NULL, &task_attr);
+    yield_id = osThreadNew(HT_YieldThread, NULL, &task_attr);
 }
 
 
@@ -214,7 +282,7 @@ static void HT_DhtThread(void *arg) {
             
             printf("\nExecultando contagem %d\n", attempt + 1);
             
-            if(attempt > 4){
+            if(attempt > 60){
                 printf("\nDht com problemas\n");
 
                                 while(1){
@@ -236,9 +304,7 @@ static void HT_DhtThread(void *arg) {
                     }
                         
                 }
-                
-                //HT_MQTT_Publish(&mqttClient, (char *)topic_temperature, (uint8_t *)msg_error, strlen(msg_error), QOS0, 0, 0, 0);
-                //HT_MQTT_Publish(&mqttClient, (char *)topic_humidity, (uint8_t *)msg_error, strlen(msg_error), QOS0, 0, 0, 0);
+            
                 
                 printf("\nProcesso para deep sleep\n");
                 sleepWithMode(SLP_HIB_STATE);
@@ -269,7 +335,7 @@ static void HT_DhtThread(void *arg) {
                     }
                         
                 }
-                
+
                 //printf("ret %d", ret);
                 //osDelay(2000);
                 
@@ -336,7 +402,17 @@ void interval_manager(uint8_t *payload, uint8_t payload_len,
     uint8_t *topic, uint8_t topic_len) {
    
         printf("\nmsg:[%s] | topico:[%s]\n", payload, topic);
-        
+
+        if(payload_len > 2){
+           
+            interval_ms = tempo_em_milisegundos(payload); //DDHHMMSS
+            converter_ms_para_string(interval_ms, interval_str);
+            printf("\nInterval atualizado [%s]\n", interval_str);
+
+            HT_FsWrite();
+            //HT_FsWrite();
+        }
+             
 }
 
 
@@ -360,9 +436,34 @@ void HT_Fsm(void) {
     }
 
     HT_MQTT_Subscribe(&mqttClient, topic_interval, QOS0);
+
+    HT_Yield_Thread(NULL);
     
-    // Init irqn after connection
-    //HT_GPIO_ButtonInit();
+    while(1){
+
+        while(!mqttClient.isconnected){
+            if(HT_FSM_MQTTConnect() == HT_NOT_CONNECTED) {
+                printf("\n MQTT Connection Error!\n");
+                osDelay(5000);
+            }
+        }
+        
+        HT_FsRead();
+        printf("File Read: %lu\n", interval_ms);
+        converter_ms_para_string(interval_ms, interval_str);
+        printf("Interval str %s\n\n",interval_str);
+        
+        bool ok1 = HT_MQTT_Publish(&mqttClient, (char *)topic_interval, (uint8_t *)("on"), strlen(("on")), QOS0, 0, 0, 0);
+        osDelay(2000);
+        
+        if (!ok1) {
+            printf("\nValores Publicados...\n");
+            break;  // Só sai quando ambos tiverem sucesso
+        }
+            
+    }
+                
+        
 
     printf("\nIniciando DHT !!!\n");
     DHT22_Init();
